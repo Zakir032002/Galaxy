@@ -24,8 +24,8 @@ pub trait Classifier: Send + Sync {
 #[derive(Debug, Clone, Serialize)]
 pub struct Prediction {
     pub label: String,
-    pub confidence: f32,          // probability of the top class
-    pub margin: f32,              // top1 - top2: small = torn between two classes
+    pub confidence: f32,           // probability of the top class
+    pub margin: f32,               // top1 - top2: small = torn between two classes
     pub probs: Vec<(String, f32)>, // all classes, most likely first
 }
 
@@ -79,9 +79,8 @@ impl SoftmaxModel {
 
         // Standardise: every feature gets mean 0, std 1, so no feature dominates just by scale.
         let mean: Vec<f32> = (0..d).map(|j| x.iter().map(|r| r[j]).sum::<f32>() / n).collect();
-        let std: Vec<f32> = (0..d)
-            .map(|j| (x.iter().map(|r| (r[j] - mean[j]).powi(2)).sum::<f32>() / n).sqrt().max(1e-6))
-            .collect();
+        let std: Vec<f32> =
+            (0..d).map(|j| (x.iter().map(|r| (r[j] - mean[j]).powi(2)).sum::<f32>() / n).sqrt().max(1e-6)).collect();
         let z: Vec<Vec<f32>> = x.iter().map(|r| standardise(r, &mean, &std)).collect();
 
         let mut m = SoftmaxModel {
@@ -99,15 +98,15 @@ impl SoftmaxModel {
                 for c in 0..k {
                     let err = p[c] - if c == yi { 1.0 } else { 0.0 }; // gradient of cross-entropy
                     gb[c] += err;
-                    for j in 0..d {
-                        gw[c][j] += err * zi[j];
+                    for (g, zj) in gw[c].iter_mut().zip(zi) {
+                        *g += err * zj; // iter_mut: change each element in place, no indexing
                     }
                 }
             }
             for c in 0..k {
                 m.bias[c] -= lr * gb[c] / n;
-                for j in 0..d {
-                    m.weights[c][j] -= lr * (gw[c][j] / n + l2 * m.weights[c][j]);
+                for (w, g) in m.weights[c].iter_mut().zip(&gw[c]) {
+                    *w -= lr * (g / n + l2 * *w);
                 }
             }
         }

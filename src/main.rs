@@ -58,7 +58,9 @@ async fn serve() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     println!("model {} | listening on http://{addr}", state.model.version());
     axum::serve(listener, router(state))
-        .with_graceful_shutdown(async { tokio::signal::ctrl_c().await.ok(); }) // finish in-flight requests on Ctrl-C
+        .with_graceful_shutdown(async {
+            tokio::signal::ctrl_c().await.ok();
+        }) // finish in-flight requests on Ctrl-C
         .await?;
     Ok(())
 }
@@ -73,9 +75,13 @@ fn eval() -> Result<()> {
     let mut mistakes = Vec::new();
 
     for line in std::fs::read_to_string(format!("{DATA}/eval_labels.csv"))?.lines().skip(1) {
-        let Some((file, truth)) = line.split_once(',') else { continue }; // let-else: skip bad lines
+        let Some((file, truth)) = line.split_once(',') else {
+            continue;
+        }; // let-else: skip bad lines
         let p = model.predict(&image::open(format!("{DATA}/eval_set/{file}"))?.to_rgb8());
-        let (Some(t), Some(pred)) = (index(truth.trim()), index(&p.label)) else { continue };
+        let (Some(t), Some(pred)) = (index(truth.trim()), index(&p.label)) else {
+            continue;
+        };
         confusion[t][pred] += 1;
         if t != pred {
             mistakes.push((p.confidence, format!("{file}: true {} -> predicted {}", truth.trim(), p.label)));
@@ -117,8 +123,11 @@ fn eval() -> Result<()> {
     Ok(())
 }
 
-/// Folder name = label. Returns (class names, feature rows, class index per row).
-fn load_training_set() -> Result<(Vec<String>, Vec<Vec<f32>>, Vec<usize>)> {
+/// (class names, feature rows, class index per row). A type alias names a long type once.
+type TrainingSet = (Vec<String>, Vec<Vec<f32>>, Vec<usize>);
+
+/// Folder name = label.
+fn load_training_set() -> Result<TrainingSet> {
     let root = format!("{DATA}/candidate_tiles");
     let mut classes: Vec<String> =
         std::fs::read_dir(&root)?.map(|e| Ok(e?.file_name().to_string_lossy().into_owned())).collect::<Result<_>>()?;

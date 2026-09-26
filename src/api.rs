@@ -56,7 +56,11 @@ struct UploadParams {
     filename: Option<String>,
 }
 
-async fn upload(State(s): State<AppState>, Query(q): Query<UploadParams>, body: Bytes) -> Result<(StatusCode, Json<Value>), ApiError> {
+async fn upload(
+    State(s): State<AppState>,
+    Query(q): Query<UploadParams>,
+    body: Bytes,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
     // Hashing, decoding, inference and SQLite all block the thread, so they run on tokio's
     // blocking pool instead of stalling the async workers that serve other requests.
     blocking(move || {
@@ -67,7 +71,8 @@ async fn upload(State(s): State<AppState>, Query(q): Query<UploadParams>, body: 
         if let Some(existing) = s.db.find(&sha, s.model.version())? {
             return Ok((StatusCode::OK, Json(json!({ "duplicate": true, "prediction": existing }))));
         }
-        let img = image::load_from_memory(&body).map_err(|e| ApiError::BadRequest(format!("not an image: {e}")))?.to_rgb8();
+        let img =
+            image::load_from_memory(&body).map_err(|e| ApiError::BadRequest(format!("not an image: {e}")))?.to_rgb8();
         if img.dimensions() != (TILE_SIZE, TILE_SIZE) {
             let (w, h) = img.dimensions();
             return Err(ApiError::Unprocessable(format!("tile is {w}x{h}, model expects {TILE_SIZE}x{TILE_SIZE}")));
@@ -88,8 +93,8 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, ApiError> + S
 
 /// One error type -> one place that decides HTTP status codes.
 pub enum ApiError {
-    BadRequest(String),    // 400: can't read the input at all
-    Unprocessable(String), // 422: readable, but not valid for this model (wrong size)
+    BadRequest(String),      // 400: can't read the input at all
+    Unprocessable(String),   // 422: readable, but not valid for this model (wrong size)
     Internal(anyhow::Error), // 500: our fault. Logged in full, client sees a generic message
 }
 

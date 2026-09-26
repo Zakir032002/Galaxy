@@ -2,6 +2,6 @@
 //! Each `pub mod` line compiles `src/<name>.rs` and makes it usable from main.rs and tests.
 
 pub mod api;
-pub mod features;
 pub mod db;
+pub mod features;
 pub mod model;
