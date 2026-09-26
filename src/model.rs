@@ -29,6 +29,37 @@ pub struct Prediction {
     pub probs: Vec<(String, f32)>, // all classes, most likely first
 }
 
+// Phase 4: what "unsure" means. Chosen from `tilesvc eval` (see ANSWERS.md), not guessed.
+pub const MIN_CONFIDENCE: f32 = 0.6;
+pub const MIN_MARGIN: f32 = 0.2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Status {
+    Confident,
+    NeedsReview,
+}
+
+impl Status {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Status::Confident => "confident",
+            Status::NeedsReview => "needs_review",
+        }
+    }
+}
+
+impl Prediction {
+    /// Confident only if the model likes its answer AND isn't torn between two classes.
+    pub fn status(&self) -> Status {
+        if self.confidence >= MIN_CONFIDENCE && self.margin >= MIN_MARGIN {
+            Status::Confident
+        } else {
+            Status::NeedsReview
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct SoftmaxModel {
     pub classes: Vec<String>,

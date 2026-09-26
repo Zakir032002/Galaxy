@@ -1,10 +1,10 @@
-//! Phase 3: `tilesvc train` and `tilesvc classify <file.png>`.
+//! CLI: `tilesvc train | eval | classify <file.png>...` (serve arrives in phase 6).
 
 use std::path::Path;
 
 use anyhow::Result;
 use tilesvc::features::extract;
-use tilesvc::model::{Classifier, SoftmaxModel};
+use tilesvc::model::{Classifier, MIN_CONFIDENCE, MIN_MARGIN, SoftmaxModel, Status};
 
 const DATA: &str = "be-mlsys-assignment-dataset";
 const MODEL: &str = "model.json";
@@ -16,6 +16,7 @@ fn main() -> Result<()> {
     // Slice patterns: match on the *shape* of the argument list.
     match args.as_slice() {
         ["train"] => train(),
+        ["eval"] => eval(),
         ["classify", files @ ..] => {
             let model = SoftmaxModel::load(Path::new(MODEL))?;
             for f in files {
@@ -25,7 +26,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         _ => {
-            eprintln!("usage: tilesvc train | classify <file.png>...");
+            eprintln!("usage: tilesvc train | eval | classify <file.png>...");
             std::process::exit(2);
         }
     }
@@ -37,6 +38,60 @@ fn train() -> Result<()> {
     model.save(Path::new(MODEL))?;
     let loaded = SoftmaxModel::load(Path::new(MODEL))?; // round-trip check + computes the version
     println!("trained on {} tiles -> {MODEL} ({})", x.len(), loaded.version());
+    Ok(())
+}
+
+/// Accuracy, confusion matrix, and the coverage table used to pick the review thresholds.
+fn eval() -> Result<()> {
+    let model = SoftmaxModel::load(Path::new(MODEL))?;
+    let classes = &model.classes;
+    let index = |label: &str| classes.iter().position(|c| c == label);
+    let mut confusion = vec![vec![0usize; classes.len()]; classes.len()]; // [true][predicted]
+    let mut rows: Vec<(f32, bool, Status)> = Vec::new(); // (confidence, correct?, status)
+    let mut mistakes = Vec::new();
+
+    for line in std::fs::read_to_string(format!("{DATA}/eval_labels.csv"))?.lines().skip(1) {
+        let Some((file, truth)) = line.split_once(',') else { continue }; // let-else: skip bad lines
+        let p = model.predict(&image::open(format!("{DATA}/eval_set/{file}"))?.to_rgb8());
+        let (Some(t), Some(pred)) = (index(truth.trim()), index(&p.label)) else { continue };
+        confusion[t][pred] += 1;
+        if t != pred {
+            mistakes.push((p.confidence, format!("{file}: true {} -> predicted {}", truth.trim(), p.label)));
+        }
+        rows.push((p.confidence, t == pred, p.status()));
+    }
+
+    // Closure: accuracy of any subset of rows.
+    let accuracy = |subset: &[&(f32, bool, Status)]| {
+        100.0 * subset.iter().filter(|r| r.1).count() as f32 / subset.len().max(1) as f32
+    };
+    let all: Vec<_> = rows.iter().collect();
+    println!("model {}  |  {} tiles  |  accuracy {:.1}%\n", model.version(), rows.len(), accuracy(&all));
+
+    println!("confusion (rows = true, cols = predicted)            recall");
+    for (i, row) in confusion.iter().enumerate() {
+        let cells: String = row.iter().map(|v| format!("{v:>4}")).collect();
+        println!("{:<12}{cells}   {:>5.1}%", classes[i], 100.0 * row[i] as f32 / row.iter().sum::<usize>() as f32);
+    }
+
+    println!("\nauto-accept if confidence >= t:\n     t  accepted  accuracy");
+    for t in [0.0, 0.5, 0.6, 0.7, 0.8, 0.9] {
+        let kept: Vec<_> = rows.iter().filter(|r| r.0 >= t).collect();
+        println!("  {t:.2}   {:>5.1}%    {:>5.1}%", 100.0 * kept.len() as f32 / rows.len() as f32, accuracy(&kept));
+    }
+
+    let confident: Vec<_> = rows.iter().filter(|r| r.2 == Status::Confident).collect();
+    println!(
+        "\npolicy (confidence >= {MIN_CONFIDENCE}, margin >= {MIN_MARGIN}): {:.1}% sent to review, {:.1}% accurate on the rest",
+        100.0 - 100.0 * confident.len() as f32 / rows.len() as f32,
+        accuracy(&confident)
+    );
+
+    mistakes.sort_by(|a, b| b.0.total_cmp(&a.0));
+    println!("\nmost confident mistakes (the dangerous ones: they skip review):");
+    for (conf, m) in mistakes.iter().take(5) {
+        println!("  {conf:.2}  {m}");
+    }
     Ok(())
 }
 
