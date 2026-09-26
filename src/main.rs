@@ -1,15 +1,19 @@
-//! CLI: `tilesvc train | eval | classify <file.png>...` (serve arrives in phase 6).
+//! CLI: `tilesvc train | eval | serve | classify <file.png>...`
 
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::Result;
+use tilesvc::api::{AppState, router};
+use tilesvc::db::Db;
 use tilesvc::features::extract;
 use tilesvc::model::{Classifier, MIN_CONFIDENCE, MIN_MARGIN, SoftmaxModel, Status};
 
 const DATA: &str = "be-mlsys-assignment-dataset";
 const MODEL: &str = "model.json";
 
-fn main() -> Result<()> {
+#[tokio::main] // starts the async runtime so `serve` can await; train/eval just run normally
+async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
 
@@ -17,6 +21,7 @@ fn main() -> Result<()> {
     match args.as_slice() {
         ["train"] => train(),
         ["eval"] => eval(),
+        ["serve"] => serve().await,
         ["classify", files @ ..] => {
             let model = SoftmaxModel::load(Path::new(MODEL))?;
             for f in files {
@@ -26,7 +31,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         _ => {
-            eprintln!("usage: tilesvc train | eval | classify <file.png>...");
+            eprintln!("usage: tilesvc train | eval | serve | classify <file.png>...");
             std::process::exit(2);
         }
     }
@@ -38,6 +43,23 @@ fn train() -> Result<()> {
     model.save(Path::new(MODEL))?;
     let loaded = SoftmaxModel::load(Path::new(MODEL))?; // round-trip check + computes the version
     println!("trained on {} tiles -> {MODEL} ({})", x.len(), loaded.version());
+    Ok(())
+}
+
+/// Fail fast: a bad model file or unwritable data dir stops startup, not the first request.
+async fn serve() -> Result<()> {
+    std::fs::create_dir_all("data/tiles")?;
+    let state = AppState {
+        model: Arc::new(SoftmaxModel::load(Path::new(MODEL))?),
+        db: Arc::new(Db::open("data/tiles.db")?),
+        tiles_dir: "data/tiles".into(),
+    };
+    let addr = std::env::var("ADDR").unwrap_or_else(|_| "127.0.0.1:8080".into()); // localhost: no auth, so opt in to exposing it
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    println!("model {} | listening on http://{addr}", state.model.version());
+    axum::serve(listener, router(state))
+        .with_graceful_shutdown(async { tokio::signal::ctrl_c().await.ok(); }) // finish in-flight requests on Ctrl-C
+        .await?;
     Ok(())
 }
 
