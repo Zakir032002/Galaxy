@@ -1,6 +1,6 @@
 # tilesvc: offline satellite tile classifier
 
-A single Rust binary that classifies 64x64 satellite tiles into 7 land-use classes (AnnualCrop, Forest, Highway, Industrial, Residential, River, SeaLake), stores every result in SQLite, and lets an analyst query them. It runs fully offline: no internet, no GPU, no Python.
+A single Rust binary that classifies 64x64 satellite tiles into 7 land-use classes (AnnualCrop, Forest, Highway, Industrial, Residential, River, SeaLake), stores every result in SQLite, and lets an analyst query them. It runs fully offline
 
 | Part | Where |
 |---|---|
